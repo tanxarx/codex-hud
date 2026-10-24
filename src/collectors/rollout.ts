@@ -16,6 +16,7 @@ import type {
   PlanProgress,
   SessionInfo,
   TokenUsageInfo,
+  RateLimitSnapshot,
   FunctionOutput,
 } from '../types.js';
 
@@ -27,6 +28,7 @@ export interface RolloutParseResult {
   toolActivity: ToolActivity;
   planProgress: PlanProgress | null;
   tokenUsage: TokenUsageInfo | null;
+  rateLimits: RateLimitSnapshot | null;
   // Compact event tracking
   compactCount: number;
   lastCompactTime: Date | null;
@@ -41,6 +43,13 @@ export interface RolloutParseOutput {
   newOffset: number;
   runningCalls: Map<string, ToolCall>;
   wasTruncated: boolean;
+}
+
+function sameTokenUsage(a: TokenUsageInfo | null, b: TokenUsageInfo | null): boolean {
+  const values = (info: TokenUsageInfo | null) => [info?.total_token_usage, info?.last_token_usage]
+    .flatMap(usage => [usage?.total_tokens, usage?.input_tokens, usage?.cached_input_tokens,
+      usage?.output_tokens, usage?.reasoning_output_tokens, usage?.cache_write_input_tokens]);
+  return JSON.stringify(values(a)) === JSON.stringify(values(b));
 }
 
 export function computeNextOffset(
@@ -140,10 +149,12 @@ export async function parseRolloutFile(
   let sessionModel: string | undefined = existingSession?.model;
   let sessionReasoningEffort: string | undefined = existingSession?.reasoningEffort;
   let sessionApprovalPolicy: string | undefined = existingSession?.approvalPolicy;
+  let sessionApprovalsReviewer: string | undefined = existingSession?.approvalsReviewer;
   let sessionSandboxMode: string | undefined = existingSession?.sandboxMode;
   let sessionServiceTier: string | undefined = existingSession?.serviceTier;
   let planProgress: PlanProgress | null = null;
   let tokenUsage: TokenUsageInfo | null = null;
+  let rateLimits: RateLimitSnapshot | null = null;
   let compactCount = 0;
   let lastCompactTime: Date | null = null;
   let lastToolActivityTime: Date | null = null;
@@ -158,6 +169,7 @@ export async function parseRolloutFile(
         toolActivity,
         planProgress,
         tokenUsage,
+        rateLimits,
         compactCount,
         lastCompactTime,
         lastToolActivityTime,
@@ -203,6 +215,7 @@ export async function parseRolloutFile(
           toolActivity,
           planProgress,
           tokenUsage,
+          rateLimits,
           compactCount,
           lastCompactTime,
           lastToolActivityTime,
@@ -235,6 +248,7 @@ export async function parseRolloutFile(
             model: sessionModel,
             reasoningEffort: sessionReasoningEffort,
             approvalPolicy: sessionApprovalPolicy,
+            approvalsReviewer: sessionApprovalsReviewer,
             sandboxMode: sessionSandboxMode,
             serviceTier: sessionServiceTier,
             modelProvider: meta.model_provider,
@@ -260,6 +274,10 @@ export async function parseRolloutFile(
             if (session) {
               session.approvalPolicy = payload.approval_policy;
             }
+          }
+          if (payload.approvals_reviewer !== undefined) {
+            sessionApprovalsReviewer = payload.approvals_reviewer;
+            if (session) session.approvalsReviewer = payload.approvals_reviewer;
           }
 
           const sandboxMode = payload.sandbox_policy?.type;
@@ -389,8 +407,13 @@ export async function parseRolloutFile(
               totalTodos: 0,
               lastUpdate: timestamp,
             };
-          } else if (payload.type === 'token_count' && payload.info) {
-            tokenUsage = payload.info;
+          } else if (payload.type === 'token_count' || payload.type === 'rate_limit') {
+            if (payload.rate_limits) rateLimits = payload.rate_limits;
+            if (payload.info) {
+              const observedAt = tokenUsage && sameTokenUsage(tokenUsage, payload.info)
+                ? tokenUsage.observedAt : timestamp;
+              tokenUsage = { ...payload.info, observedAt };
+            }
           } else if (payload.type === 'context_compacted') {
             // /compact command was executed - track it
             compactCount++;
@@ -616,6 +639,10 @@ export class RolloutParser {
 
     // Merge with cached result for session info and accumulated stats
     if (this.cachedResult) {
+      if (result.tokenUsage && sameTokenUsage(result.tokenUsage, this.cachedResult.tokenUsage)) {
+        result.tokenUsage.observedAt = this.cachedResult.tokenUsage?.observedAt;
+      }
+      result.rateLimits ??= this.cachedResult.rateLimits;
       // Keep the stable session identity while retaining fields updated by
       // incremental turn_context records.
       if (this.cachedResult.session && result.session) {

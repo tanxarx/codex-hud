@@ -17,6 +17,7 @@ NC=$'\033[0m'
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WRAPPER_PATH="$SCRIPT_DIR/bin/codex-hud"
+LINK_WRAPPER_PATH="$SCRIPT_DIR/bin/codex-hud-link"
 INSTALL_CMD_PATH="$SCRIPT_DIR/bin/codex-hud-install"
 SYNC_CMD_PATH="$SCRIPT_DIR/bin/codex-hud-sync"
 UPGRADE_CMD_PATH="$SCRIPT_DIR/bin/codex-hud-upgrade"
@@ -250,6 +251,7 @@ backup_existing_aliases() {
     local existing_aliases=""
     local alias_names=(
         "cx"
+        "cxl"
         "codex-resume"
         "codex-hud-install"
         "codex-hud-sync"
@@ -272,7 +274,7 @@ backup_existing_aliases() {
         
         local temp_file
         temp_file=$(mktemp)
-        grep -Ev "^alias (cx|codex-resume|codex-hud-install|codex-hud-sync|codex-hud-upgrade|codex-hud-uninstall)[= ]" "$rc_file" > "$temp_file" || true
+        grep -Ev "^alias (cx|cxl|codex-resume|codex-hud-install|codex-hud-sync|codex-hud-upgrade|codex-hud-uninstall)[= ]" "$rc_file" > "$temp_file" || true
         mv "$temp_file" "$rc_file"
     fi
 }
@@ -283,6 +285,7 @@ write_aliases() {
 
     if [[ "$shell_name" == "fish" ]]; then
         echo "alias cx '$WRAPPER_PATH'  $MARKER" >> "$rc_file"
+        echo "alias cxl '$LINK_WRAPPER_PATH'  $MARKER" >> "$rc_file"
         echo "alias codex-resume '$WRAPPER_PATH resume'  $MARKER" >> "$rc_file"
         echo "alias codex-hud-install '$INSTALL_CMD_PATH'  $MARKER" >> "$rc_file"
         echo "alias codex-hud-sync '$SYNC_CMD_PATH'  $MARKER" >> "$rc_file"
@@ -292,6 +295,7 @@ write_aliases() {
     fi
 
     echo "alias cx='$WRAPPER_PATH'  $MARKER" >> "$rc_file"
+    echo "alias cxl='$LINK_WRAPPER_PATH'  $MARKER" >> "$rc_file"
     echo "alias codex-resume='$WRAPPER_PATH resume'  $MARKER" >> "$rc_file"
     echo "alias codex-hud-install='$INSTALL_CMD_PATH'  $MARKER" >> "$rc_file"
     echo "alias codex-hud-sync='$SYNC_CMD_PATH'  $MARKER" >> "$rc_file"

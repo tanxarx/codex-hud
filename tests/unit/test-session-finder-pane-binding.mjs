@@ -100,8 +100,46 @@ function assertSamePath(actual, expected, message) {
 const originalCodexHome = process.env.CODEX_HOME;
 const originalMainPane = process.env.CODEX_HUD_MAIN_PANE;
 const originalSessionsPath = process.env.CODEX_SESSIONS_PATH;
+const originalBindingFile = process.env.CODEX_HUD_BINDING_FILE;
+delete process.env.CODEX_HUD_BINDING_FILE;
 
 try {
+  {
+    const home = makeTempCodexHome();
+    const cwd = home;
+    process.env.CODEX_HOME = home;
+    delete process.env.CODEX_SESSIONS_PATH;
+    process.env.CODEX_HUD_MAIN_PANE = '%70';
+    const bindingFile = path.join(home, 'binding.json');
+    process.env.CODEX_HUD_BINDING_FILE = bindingFile;
+    const thread = '019d7291-a135-7fe1-b46f-8f3eca4fa451';
+    const other = '019d7295-3ef8-7292-a039-fdf7ecd4f53e';
+    // A shared daemon may snapshot its own stale pane environment.
+    writeRollout(home, { sessionId: other, cwd });
+    writeSnapshot(home, other, '%70', 1775743876858615370n);
+    const finder = new SessionFinder(cwd);
+    assert.equal(finder.check(), null, 'remote launch must wait for its own client binding');
+    const bind = (threadId, paneId = '%70', rolloutPath) => fs.writeFileSync(bindingFile,
+      JSON.stringify({ version: 1, paneId, threadId, rolloutPath }));
+    bind(thread);
+    assert.equal(finder.check(), null, 'binding may arrive before the rollout is persisted');
+    const rollout = writeRollout(home, { sessionId: thread, cwd });
+    assertSamePath(finder.check().path, rollout, 'remote binding must override unrelated snapshots');
+    bind(other, '%71');
+    assert.equal(finder.check(), null, 'another pane binding must never be adopted');
+    // Resuming a thread can return a path in a different daemon CODEX_HOME.
+    const daemonHome = makeTempCodexHome();
+    const resumed = writeRollout(daemonHome, { sessionId: other, cwd });
+    bind(thread, '%70', resumed);
+    assertSamePath(finder.check().path, rollout, 'a mismatched daemon path must be ignored');
+    bind(other, '%70', resumed);
+    assertSamePath(finder.check().path, resumed, 'resume must follow the returned thread and path');
+    bind(null);
+    assert.equal(finder.check(), null, 'unsubscribe must clear the old thread');
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(daemonHome, { recursive: true, force: true });
+    delete process.env.CODEX_HUD_BINDING_FILE;
+  }
   {
     const home = makeTempCodexHome();
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-hud-cwd-'));
@@ -427,6 +465,11 @@ try {
     );
   }
 } finally {
+  if (originalBindingFile === undefined) {
+    delete process.env.CODEX_HUD_BINDING_FILE;
+  } else {
+    process.env.CODEX_HUD_BINDING_FILE = originalBindingFile;
+  }
   if (originalCodexHome === undefined) {
     delete process.env.CODEX_HOME;
   } else {

@@ -37,6 +37,7 @@ const rolloutPath = writeRollout([
       current_date: '2026-04-09',
       timezone: 'Asia/Hong_Kong',
       approval_policy: 'on-request',
+      approvals_reviewer: 'auto_review',
       sandbox_policy: { type: 'workspace-write' },
       model: 'gpt-5.4',
       collaboration_mode: {
@@ -63,6 +64,7 @@ const rolloutPath = writeRollout([
 const { result } = await parseRolloutFile(rolloutPath, 0, 5);
 
 assert.equal(result.session?.model, 'gpt-5.4', 'turn_context should populate session model');
+assert.equal(result.session?.approvalsReviewer, 'auto_review', 'turn_context must preserve the native approval reviewer');
 assert.equal(
   result.session?.reasoningEffort,
   'xhigh',

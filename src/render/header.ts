@@ -22,6 +22,7 @@ import {
   renderSessionDetailLine,
   collectActivityLines,
 } from './lines/index.js';
+import { renderCacheLine, renderMemoryLine, renderQuotaLine } from './lines/dashboard-lines.js';
 
 export function renderCompactAgentSummary(agentActivity: AgentActivity | undefined): string | null {
   if (!agentActivity) {
@@ -176,14 +177,22 @@ function renderExpandedLayout(data: HudData, layout: LayoutConfig, width: number
   
   // Row 2: Environment line
   const envLine = renderEnvironmentLine(data);
-  if (envLine) {
+  if (envLine && layout.mode !== 'claude') {
     lines.push(envLine);
   }
   
   // Row 3: Token usage and context progress bar (ALWAYS show if data available)
-  const tokenLine = renderTokenLine(data);
+  const tokenLine = renderTokenLine(data, { cumulative: layout.mode === 'claude' });
   if (tokenLine) {
     lines.push(tokenLine);
+  }
+  if (layout.mode === 'claude') {
+    const quotaLine = renderQuotaLine(data);
+    if (quotaLine) lines.push(quotaLine);
+    lines.push(renderCacheLine(data));
+    const memoryLine = renderMemoryLine(data);
+    if (memoryLine) lines.push(memoryLine);
+    if (envLine) lines.push(envLine);
   }
   
   // Row 4: Session details (directory, session ID, etc.)

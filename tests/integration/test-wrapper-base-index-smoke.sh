@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 FAKE_BIN_DIR="$(mktemp -d)"
-TMUX_DIR="$(mktemp -d)"
+TMUX_DIR="$(mktemp -d /tmp/ch-tmux.XXXXXX)"
 TMUX_SOCKET="codexhud-base-index-$$"
 
 cleanup() {

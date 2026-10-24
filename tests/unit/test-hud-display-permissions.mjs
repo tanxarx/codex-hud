@@ -11,6 +11,9 @@ const layout = {
   showContextBreakdown: true,
   barWidth: 10,
 };
+assert.equal(getApprovalPolicyDisplay({}, {
+  approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandboxMode: 'workspace-write',
+}), 'auto review', 'native automatic approval review must be shown accurately');
 
 const baseData = {
   config: {

@@ -106,7 +106,8 @@ function truncateLines(lines: string[], width: number): string[] {
  * Create default layout config based on terminal size
  */
 function createDefaultLayout(width: number, height: number): LayoutConfig {
-  const mode: LayoutMode = height <= 1 ? 'compact' : 'expanded';
+  const mode: LayoutMode = height <= 1 ? 'compact'
+    : process.env.CODEX_HUD_STYLE === 'claude' ? 'claude' : 'expanded';
   
   return {
     mode,

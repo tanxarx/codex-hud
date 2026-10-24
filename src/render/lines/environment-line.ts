@@ -58,6 +58,7 @@ export function renderEnvironmentLine(data: HudData): string | null {
   // Approval policy
   const approvalPolicy = getApprovalPolicyDisplay(data.config, {
     approvalPolicy: data.session?.approvalPolicy,
+    approvalsReviewer: data.session?.approvalsReviewer,
     sandboxMode: data.session?.sandboxMode,
   });
   parts.push(colors.dim('Approval: ') + theme.value(approvalPolicy));

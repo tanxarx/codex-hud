@@ -5,6 +5,7 @@
 
 import { readCodexConfig } from './collectors/codex-config.js';
 import * as fs from 'fs';
+import { collectMemoryUsage } from './collectors/memory.js';
 import { collectGitStatus } from './collectors/git.js';
 import { collectProjectInfo } from './collectors/project.js';
 import { SessionFinder, findActiveRollouts } from './collectors/session-finder.js';
@@ -140,6 +141,9 @@ function collectSyncData(): Omit<HudData, 'toolActivity' | 'planProgress' | 'tok
     git: collectGitStatus(cwd),
     project: collectProjectInfo(cwd, config),
     sessionStart: SESSION_START,
+    memory: process.env.CODEX_HUD_STYLE === 'claude'
+      ? collectMemoryUsage()
+      : undefined,
   };
 }
 
@@ -230,6 +234,7 @@ async function collectData(): Promise<HudData> {
     agentActivity,
     planProgress: rolloutData?.planProgress ?? undefined,
     tokenUsage: rolloutData?.tokenUsage ?? undefined,
+    rateLimits: rolloutData?.rateLimits ?? undefined,
     contextUsage,
     displayMode,
   };

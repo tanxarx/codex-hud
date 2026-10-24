@@ -286,8 +286,10 @@ function formatSessionId(sessionId: string): string {
   return `${sessionId.slice(0, 8)}…${sessionId.slice(-4)}`;
 }
 
-export function renderTokenLine(data: HudData): string | null {
-  const usage = data.tokenUsage?.last_token_usage ?? data.tokenUsage?.total_token_usage;
+export function renderTokenLine(data: HudData, options: { cumulative?: boolean } = {}): string | null {
+  const usage = options.cumulative
+    ? data.tokenUsage?.total_token_usage ?? data.tokenUsage?.last_token_usage
+    : data.tokenUsage?.last_token_usage ?? data.tokenUsage?.total_token_usage;
   // Always show token line if we have any token or context data
   if (!usage && !data.contextUsage) {
     return null;
@@ -310,7 +312,7 @@ export function renderTokenLine(data: HudData): string | null {
     );
   } else if (data.tokenUsage?.model_context_window && usage) {
     const total = data.tokenUsage.model_context_window;
-    const totalTokens = usage.total_tokens ?? 0;
+    const totalTokens = (data.tokenUsage.last_token_usage ?? usage).total_tokens ?? 0;
     const percent = total > 0 ? Math.round((totalTokens / total) * 100) : 0;
     const bar = renderContextProgressBar(percent, 12);
     const percentDisplay = percent >= 85 
@@ -359,6 +361,12 @@ export function renderSessionDetailLine(data: HudData): string | null {
   
   // Always show session info if we have a session
   const session = data.session;
+  if (data.git.githubRepo) {
+    parts.push(colors.dim('GitHub: ') + theme.info(data.git.githubRepo));
+  }
+  if (data.git.isLinkedWorktree && data.git.worktreeName) {
+    parts.push(colors.dim('Worktree: ') + theme.value(data.git.worktreeName));
+  }
   
   // Show working directory
   const cwd = session?.cwd || data.project.cwd;

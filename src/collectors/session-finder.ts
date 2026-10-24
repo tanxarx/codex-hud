@@ -468,7 +468,22 @@ function buildSessionFile(filePath: string): SessionFile | null {
   }
 }
 
-export function findRolloutByThreadId(threadId: string): SessionFile | null {
+export function findRolloutByThreadId(threadId: string, relativeTo?: string): SessionFile | null {
+  // A remote daemon can use a different Codex home than its TUI. Resolve
+  // descendants and fork sources beside the authoritative root rollout first.
+  if (relativeTo) {
+    let directory = path.dirname(relativeTo);
+    while (path.dirname(directory) !== directory) {
+      if (['sessions', ARCHIVED_SESSIONS_SUBDIR].includes(path.basename(directory))) {
+        for (const name of ['sessions', ARCHIVED_SESSIONS_SUBDIR]) {
+          const found = findRolloutPathBySessionIdInRoot(path.join(path.dirname(directory), name), threadId);
+          if (found) return buildSessionFile(found);
+        }
+        break;
+      }
+      directory = path.dirname(directory);
+    }
+  }
   const codexHome = getCodexHome();
   const activePath = findRolloutPathBySessionIdInRoot(
     getSessionsDir({ requireExisting: false }),
@@ -542,6 +557,13 @@ export class SessionFinder {
       this.currentPaneId = mainPaneId;
     }
 
+    // Remote app-server snapshots describe the daemon's environment. Only the
+    // private relay for this launch can identify the TUI's thread in that mode.
+    const bindingFile = process.env.CODEX_HUD_BINDING_FILE;
+    if (bindingFile) {
+      return this.checkRemoteBinding(bindingFile, mainPaneId);
+    }
+
     const snapshot = findSnapshotForPane(mainPaneId);
     if (snapshot && this.acceptSnapshot(snapshot)) {
       this.bindingEstablished = true;
@@ -579,6 +601,43 @@ export class SessionFinder {
    */
   getCurrentSession(): SessionFile | null {
     return this.currentSession;
+  }
+
+  private checkRemoteBinding(bindingFile: string, paneId: string): SessionFile | null {
+    try {
+      const binding = JSON.parse(fs.readFileSync(bindingFile, 'utf8'));
+      if (binding.version !== 1 || binding.paneId !== paneId ||
+          typeof binding.threadId !== 'string' || !/^[a-f0-9-]+$/.test(binding.threadId)) {
+        this.currentThreadId = null;
+        this.clearSession();
+        return null;
+      }
+      // The daemon may use a different CODEX_HOME. Accept its exact rollout path
+      // only when both the filename and metadata identify the returned thread.
+      if (typeof binding.rolloutPath === 'string' && path.isAbsolute(binding.rolloutPath)) {
+        const candidate = buildSessionFile(binding.rolloutPath);
+        if (candidate && candidate.sessionId === binding.threadId) {
+          const firstLine = readFirstLine(candidate.path);
+          const metadata = firstLine ? JSON.parse(firstLine) : null;
+          if (metadata?.type === 'session_meta' && metadata.payload?.id === binding.threadId) {
+            this.currentThreadId = binding.threadId;
+            return this.adoptSession(candidate);
+          }
+        }
+      }
+      if (this.currentThreadId === binding.threadId && this.currentSession &&
+          fs.existsSync(this.currentSession.path)) {
+        this.refreshSessionStats();
+        return this.currentSession;
+      }
+      this.currentThreadId = binding.threadId;
+      const next = findRolloutByThreadId(binding.threadId);
+      if (next) return this.adoptSession(next);
+    } catch {
+      // Wait for the relay/rollout to become visible; never guess by cwd or mtime.
+    }
+    this.clearSession();
+    return null;
   }
 
   private acceptSnapshot(snapshot: SnapshotBinding): boolean {

@@ -24,12 +24,14 @@ export interface CodexConfig {
   service_tier?: string;
   hooks?: boolean;
   approval_policy?: string;
+  approvals_reviewer?: string;
   sandbox_mode?: string;
   mcp_servers?: Record<string, McpServerConfig>;
 }
 
 export interface PermissionState {
   approvalPolicy?: string;
+  approvalsReviewer?: string;
   sandboxMode?: string;
 }
 
@@ -59,6 +61,11 @@ export interface GitStatus {
   added: number;
   deleted: number;
   untracked: number;
+  worktreeRoot?: string;
+  worktreeName?: string;
+  isLinkedWorktree?: boolean;
+  githubRepo?: string;
+  upstreamBranch?: string;
 }
 
 // ============================================================================
@@ -126,7 +133,7 @@ export interface SessionOverview {
 // Layout Configuration
 // ============================================================================
 
-export type LayoutMode = 'compact' | 'standard' | 'expanded';
+export type LayoutMode = 'compact' | 'standard' | 'expanded' | 'claude';
 
 export interface LayoutConfig {
   mode: LayoutMode;
@@ -279,6 +286,7 @@ export interface EventMsgPayload {
 
 export interface TurnContextPayload {
   approval_policy?: string;
+  approvals_reviewer?: string;
   sandbox_policy?: {
     type?: string;
   };
@@ -309,11 +317,14 @@ export interface TokenUsageInfo {
   total_token_usage?: TokenUsage;
   last_token_usage?: TokenUsage;
   model_context_window?: number;
+  /** Timestamp of the last changed model-usage record, never a file mtime. */
+  observedAt?: Date;
 }
 
 export interface TokenUsage {
   input_tokens?: number;
   cached_input_tokens?: number;
+  cache_write_input_tokens?: number;
   output_tokens?: number;
   reasoning_output_tokens?: number;
   total_tokens?: number;
@@ -323,6 +334,15 @@ export interface RateLimitSnapshot {
   requests_remaining?: number;
   tokens_remaining?: number;
   reset_time?: string;
+  limit_id?: string;
+  primary?: RateLimitWindow | null;
+  secondary?: RateLimitWindow | null;
+}
+
+export interface RateLimitWindow {
+  used_percent: number;
+  window_minutes?: number;
+  resets_at?: number;
 }
 
 // ============================================================================
@@ -407,6 +427,7 @@ export interface SessionInfo {
   model?: string;
   reasoningEffort?: string;
   approvalPolicy?: string;
+  approvalsReviewer?: string;
   sandboxMode?: string;
   serviceTier?: string;
   modelProvider?: string;
@@ -437,6 +458,8 @@ export interface HudData {
   // Context/token usage
   contextUsage?: ContextUsage;
   tokenUsage?: TokenUsageInfo;
+  rateLimits?: RateLimitSnapshot;
+  memory?: { usedBytes: number; totalBytes: number };
   
   // Activity tracking
   toolActivity?: ToolActivity;

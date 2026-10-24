@@ -51,6 +51,7 @@ run_case() {
     "CODEX_HOME=$TEST_ROOT/codex-home"
     "CODEX_HUD_UPDATE_CHECK=0"
     "CODEX_HUD_HEIGHT_AUTO=0"
+    "CODEX_HUD_STYLE=${4:-}"
     "TMUX_LOG_FILE=$log_file"
     "TMUX_MAIN_PANE_ID=%1"
     "TMUX_PANE_ID=%2"
@@ -104,5 +105,6 @@ run_case() {
 
 run_case default 5 ""
 run_case explicit 7 7
+run_case dashboard 10 "" claude
 
 echo "test-default-hud-height: PASS (default=5 explicit=7)"

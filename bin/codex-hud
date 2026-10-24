@@ -68,6 +68,7 @@ UPDATE_HELPER_PATH="$SCRIPT_DIR/codex-hud-update.mjs"
 UPDATE_UPGRADE_PATH="$SCRIPT_DIR/codex-hud-upgrade"
 FORCE_ATTACH="0"
 FORCE_NEW_SESSION="0"
+REMOTE_BINDING_DIR=""
 
 # Colors for output
 RED='\033[0;31m'
@@ -733,6 +734,15 @@ prepare_sqlite_home() {
 
 launch_environment_prefix() {
     local prefix=""
+    local name
+    # tmux servers outlive terminals. Copy the caller's launch context onto the
+    # pane instead of inheriting another terminal's PATH, style or Superset IDs.
+    for name in PATH CODEX_HUD_STYLE CODEX_HUD_CACHE_TTL_SECONDS \
+        SUPERSET_TERMINAL_ID SUPERSET_TAB_ID SUPERSET_PANE_ID SUPERSET_WORKSPACE_PATH \
+        SUPERSET_HOME_DIR SUPERSET_DEFAULT_CODEX_HOME SUPERSET_AMBIENT_CODEX_HOME \
+        SUPERSET_AGENT_ID SUPERSET_AGENT_LAUNCH_ID; do
+        prefix="${prefix}${name}=$(shell_quote "${!name-}") "
+    done
     local effective_home=""
     # StepCode supplies a managed home through CODEX_HOME_OVERRIDE. Native
     # launches have no suffix, so the wrapper CODEX_HOME must be copied onto
@@ -744,7 +754,7 @@ launch_environment_prefix() {
         effective_home="$CODEX_HOME"
     fi
     if [[ -n "$effective_home" ]]; then
-        prefix="CODEX_HOME=$(shell_quote "$effective_home") "
+        prefix="${prefix}CODEX_HOME=$(shell_quote "$effective_home") "
     fi
     if [[ -n "$CODEX_SESSIONS_OVERRIDE" ]]; then
         prefix="${prefix}CODEX_SESSIONS_PATH=$(shell_quote "$CODEX_SESSIONS_OVERRIDE") "
@@ -899,13 +909,15 @@ build_hud() {
     local src_file="$HUD_DIR/src/index.ts"
     
     # Check if node_modules exists
-    if [[ ! -d "$HUD_DIR/node_modules" ]]; then
+    if [[ ! -d "$HUD_DIR/node_modules" ]] || ! node -e "require.resolve('ws', { paths: [process.argv[1]] })" "$HUD_DIR" >/dev/null 2>&1; then
         step "Installing dependencies..."
         (cd "$HUD_DIR" && npm install) || error "Failed to install dependencies"
     fi
     
     # Check if we need to build
-    if [[ ! -f "$dist_file" ]] || [[ "$src_file" -nt "$dist_file" ]]; then
+    if [[ ! -f "$dist_file" ]] || [[ "$src_file" -nt "$dist_file" ]] || \
+        [[ ! -f "$HUD_DIR/dist/remote-launch.js" ]] || \
+        [[ -n "$(find "$HUD_DIR/src" -name '*.ts' -newer "$dist_file" -print -quit 2>/dev/null)" ]]; then
         step "Building HUD renderer..."
         (cd "$HUD_DIR" && npm run build) || error "Failed to build HUD renderer"
     fi
@@ -913,7 +925,17 @@ build_hud() {
 
 # Get the current working directory for Codex
 get_cwd() {
-    pwd
+    local target="$PWD" next="0" arg
+    for arg in "$@"; do
+        if [[ "$next" == "1" ]]; then target="$arg"; next="0"; continue; fi
+        [[ "$arg" == "--" ]] && break
+        case "$arg" in
+            -C|--cd) next="1" ;;
+            --cd=*) target="${arg#--cd=}" ;;
+            -C?*) target="${arg#-C}" ;;
+        esac
+    done
+    (cd -- "$target" && pwd) || error "Unable to open Codex directory: $target"
 }
 
 # Get the first pane ID in the session
@@ -1061,6 +1083,9 @@ cleanup() {
             tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
         fi
     fi
+    if [[ "${SESSION_PRESERVE_ON_EXIT:-}" != "true" && -n "$REMOTE_BINDING_DIR" ]]; then
+        rm -rf -- "$REMOTE_BINDING_DIR"
+    fi
 }
 
 # Attach a client to the HUD session without asking tmux to attach through an
@@ -1109,6 +1134,9 @@ resolve_hud_height() {
     fi
     
     local desired=5
+    if [[ "${CODEX_HUD_STYLE:-}" == "claude" ]]; then
+        desired=10
+    fi
     if [[ "$desired" -lt "$min_height" ]]; then
         desired="$min_height"
     fi
@@ -1129,6 +1157,8 @@ create_session() {
     local codex_args=("$@")
     local cwd_escaped
     cwd_escaped=$(shell_quote "$cwd")
+    local launch_cwd_escaped
+    launch_cwd_escaped=$(shell_quote "$PWD")
     
     # Calculate terminal dimensions
     local term_height
@@ -1154,6 +1184,26 @@ create_session() {
     for arg in "${codex_args[@]}"; do
         codex_cmd="$codex_cmd $(shell_quote "$arg")"
     done
+    # One relay and binding file per launch: independent of cwd, terminal and
+    # tmux pane numbering. Keep Unix socket paths below macOS's length limit.
+    local remote_binding_env="CODEX_HUD_BINDING_FILE='' "
+    local remote_uri="" remote_next="0"
+    for arg in "${codex_args[@]}"; do
+        if [[ "$remote_next" == "1" ]]; then
+            remote_uri="$arg"
+            break
+        fi
+        [[ "$arg" == "--" ]] && break
+        case "$arg" in
+            --remote) remote_next="1" ;;
+            --remote=*) remote_uri="${arg#--remote=}"; break ;;
+        esac
+    done
+    if [[ "$remote_uri" == unix:///* ]]; then
+        REMOTE_BINDING_DIR=$(node "$HUD_DIR/dist/remote-launch.js" --create-directory)
+        codex_cmd="node $(shell_quote "$HUD_DIR/dist/remote-launch.js") $(shell_quote "$REMOTE_BINDING_DIR") $codex_cmd"
+        remote_binding_env="CODEX_HUD_BINDING_FILE=$(shell_quote "$REMOTE_BINDING_DIR/binding.json") "
+    fi
     local launch_env_prefix
     launch_env_prefix=$(launch_environment_prefix)
     if [[ -n "$launch_env_prefix" ]]; then
@@ -1219,7 +1269,7 @@ create_session() {
     local attach_gate_cmd
     attach_gate_cmd="i=0; while [ \"\$(tmux show-option -t '$SESSION_NAME' -qv @codex_hud_client_attached)\" != \"1\" ] && [ \"\$i\" -lt 200 ]; do sleep 0.05; i=\$((i+1)); done"
     local codex_launch_cmd
-    codex_launch_cmd="$attach_gate_cmd; cd ${cwd_escaped} && $codex_cmd; codex_status=\$?; if [ \"\$codex_status\" -eq 130 ]; then if ! tmux detach-client -s '$SESSION_NAME' -E \"exit \$codex_status\"; then printf '[codex-hud] Unable to return interrupt status through tmux client; exiting with status %s.\\n' \"\$codex_status\" >&2; fi; exit \"\$codex_status\"; fi; if [ \"\$codex_status\" -ne 0 ]; then printf '\\n[codex-hud] Codex exited with status %s. Press Enter to close.\\n' \"\$codex_status\" >&2; if ! IFS= read -r _codex_hud_close; then printf '[codex-hud] Input closed before acknowledgement; returning status %s.\\n' \"\$codex_status\" >&2; fi; if ! tmux detach-client -s '$SESSION_NAME' -E \"exit \$codex_status\"; then printf '[codex-hud] Unable to return status through tmux client; exiting with status %s.\\n' \"\$codex_status\" >&2; fi; exit \"\$codex_status\"; fi; tmux kill-session -t '$SESSION_NAME'"
+    codex_launch_cmd="$attach_gate_cmd; cd ${launch_cwd_escaped} && $codex_cmd; codex_status=\$?; if [ \"\$codex_status\" -eq 130 ]; then if ! tmux detach-client -s '$SESSION_NAME' -E \"exit \$codex_status\"; then printf '[codex-hud] Unable to return interrupt status through tmux client; exiting with status %s.\\n' \"\$codex_status\" >&2; fi; exit \"\$codex_status\"; fi; if [ \"\$codex_status\" -ne 0 ]; then printf '\\n[codex-hud] Codex exited with status %s. Press Enter to close.\\n' \"\$codex_status\" >&2; if ! IFS= read -r _codex_hud_close; then printf '[codex-hud] Input closed before acknowledgement; returning status %s.\\n' \"\$codex_status\" >&2; fi; if ! tmux detach-client -s '$SESSION_NAME' -E \"exit \$codex_status\"; then printf '[codex-hud] Unable to return status through tmux client; exiting with status %s.\\n' \"\$codex_status\" >&2; fi; exit \"\$codex_status\"; fi; tmux kill-session -t '$SESSION_NAME'"
     local pane_shell="${CODEX_PANE_SHELL_PATH:-}"
     if [[ -n "$pane_shell" ]]; then
         validate_shell_path "$pane_shell"
@@ -1246,7 +1296,7 @@ create_session() {
     session_start=$(date +%s)
     local hud_env_prefix
     hud_env_prefix=$(launch_environment_prefix)
-    local hud_cmd="cd ${cwd_escaped} && ${hud_env_prefix}LINES='$HUD_HEIGHT' COLUMNS='$term_width' CODEX_HUD_CWD=${cwd_escaped} CODEX_HUD_MAIN_PANE='$main_pane_id' CODEX_HUD_SESSION_START='$session_start' CODEX_HUD_TMUX_SESSION='$SESSION_NAME' CODEX_HUD_CLEAR_SCROLLBACK='${CODEX_HUD_CLEAR_SCROLLBACK:-}' node '$HUD_DIR/dist/index.js'"
+    local hud_cmd="cd ${cwd_escaped} && ${hud_env_prefix}${remote_binding_env}LINES='$HUD_HEIGHT' COLUMNS='$term_width' CODEX_HUD_CWD=${cwd_escaped} CODEX_HUD_MAIN_PANE='$main_pane_id' CODEX_HUD_SESSION_START='$session_start' CODEX_HUD_TMUX_SESSION='$SESSION_NAME' CODEX_HUD_CLEAR_SCROLLBACK='${CODEX_HUD_CLEAR_SCROLLBACK:-}' node '$HUD_DIR/dist/index.js'"
     
     if [[ "$HUD_POSITION" == "top" ]]; then
         # Split at top, then swap panes
@@ -1312,7 +1362,24 @@ main() {
     
     # Get current working directory
     local cwd
-    cwd=$(get_cwd)
+    cwd=$(get_cwd "${codex_args[@]}")
+    # Remote app-server resolves relative -C values against its daemon cwd.
+    # Make the caller's selected path explicit before crossing that boundary.
+    local cd_index cd_next="0"
+    for ((cd_index=0; cd_index<${#codex_args[@]}; cd_index++)); do
+        if [[ "$cd_next" == "1" ]]; then
+            codex_args[$cd_index]="$cwd"; cd_next="0"; continue
+        fi
+        [[ "${codex_args[$cd_index]}" == "--" ]] && break
+        case "${codex_args[$cd_index]}" in
+            -C|--cd) cd_next="1" ;;
+            --cd=*) codex_args[$cd_index]="--cd=$cwd" ;;
+            -C?*) codex_args[$cd_index]="-C$cwd" ;;
+        esac
+    done
+    PROJECT_SLUG=$(session_project_slug "$cwd")
+    SESSION_HASH=$(hash_cwd "$cwd")
+    refresh_session_identity
     
     # Check for existing session
     if check_existing_session; then
@@ -1377,6 +1444,8 @@ Environment Variables:
   CODEX_HOME          Forwarded into the tmux pane for native launches; StepCode still uses its managed home
   CODEX_HUD_POSITION  HUD pane position: bottom (default), top
   CODEX_HUD_HEIGHT    HUD pane height in lines (default: 5)
+  CODEX_HUD_STYLE     claude for the detailed dashboard (default height: 10); empty for classic
+  CODEX_HUD_CACHE_TTL_SECONDS Optional assumed cache lifetime for an estimated expiry reminder
   CODEX_HUD_HEIGHT_AUTO Auto-adjust HUD height based on pane width (default: 0)
   CODEX_HUD_HEIGHT_MIN Minimum HUD height when auto-adjusting (default: CODEX_HUD_HEIGHT)
   CODEX_HUD_HEIGHT_MAX Maximum HUD height when auto-adjusting (default: 12)

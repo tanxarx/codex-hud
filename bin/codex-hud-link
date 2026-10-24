@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Codex HUD + agent-link. All setup and TUI launches keep the native CLI's permissions.
+set -eo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+agent_link_cli="${AGENT_LINK_CLI_PATH:-$HOME/Projects/agent-link/dist/cli.js}"
+agent_link_node="${AGENT_LINK_NODE:-$(command -v node)}"
+export CODEX_HUD_STYLE="${CODEX_HUD_STYLE:-claude}"
+# This fork has its own update cadence; merge upstream deliberately.
+export CODEX_HUD_UPDATE_CHECK="${CODEX_HUD_UPDATE_CHECK:-0}"
+
+case "${1:-}" in
+    -h|--help)
+        printf '%s\n' 'Usage: codex-hud-link [resume|fork] [codex-hud / Codex options...]' \
+            'Starts the native daemon, ensures agent-link, and launches the detailed HUD.' \
+            'Set AGENT_LINK_CLI_PATH for a nonstandard agent-link checkout.'
+        exit 0 ;;
+esac
+
+if [[ ! -f "$agent_link_cli" ]]; then
+    printf 'codex-hud-link: agent-link CLI not found: %s\nSet AGENT_LINK_CLI_PATH to its dist/cli.js.\n' "$agent_link_cli" >&2
+    exit 1
+fi
+
+subcommand=()
+case "${1:-}" in resume|fork) subcommand=("$1"); shift ;; esac
+# Capture the invocation directory explicitly: app-server is a shared daemon.
+# An explicit user -C/--cd overrides this default in the HUD wrapper and Codex.
+has_cd=0
+for argument in "$@"; do
+    [[ "$argument" == -- ]] && break
+    case "$argument" in
+        -C|--cd|-C?*|--cd=*) has_cd=1 ;;
+        --remote|--remote=*|--no-daemon)
+            printf 'codex-hud-link: %s conflicts with the agent-link launch. Use codex-hud directly for native/other endpoints.\n' "$argument" >&2
+            exit 1 ;;
+    esac
+done
+directory=()
+if [[ "$has_cd" == 0 ]]; then directory=(-C "$PWD"); fi
+codex app-server daemon start >/dev/null
+proxy=$("$agent_link_node" "$agent_link_cli" ensure)
+if [[ "$proxy" != /* || "$proxy" == *$'\n'* ]]; then
+    printf 'codex-hud-link: agent-link did not return one absolute proxy socket path.\n' >&2
+    exit 1
+fi
+exec "$SCRIPT_DIR/codex-hud" "${subcommand[@]}" --remote "unix://$proxy" "${directory[@]}" "$@"

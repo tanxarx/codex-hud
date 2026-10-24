@@ -680,7 +680,8 @@ export class AgentActivityCollector {
 
   constructor(options: AgentActivityCollectorOptions) {
     this.inactivityTimeoutMs = options.inactivityTimeoutMs;
-    this.resolveRollout = options.resolveRollout ?? findRolloutByThreadId;
+    this.resolveRollout = options.resolveRollout ?? ((threadId) =>
+      findRolloutByThreadId(threadId, this.root?.session.path));
     this.logError = options.logError ?? defaultTrackingErrorLogger;
   }
 
@@ -725,7 +726,7 @@ export class AgentActivityCollector {
         nodes: [],
         nowMs,
         inactivityTimeoutMs: this.inactivityTimeoutMs,
-        rootTrackingError: true,
+        rootTrackingError: this.root.trackingError !== null,
       });
     }
 
@@ -792,6 +793,11 @@ export class AgentActivityCollector {
             candidate.forkedFromId,
             batch.records
           );
+          if (boundary === null) {
+            this.clearRootTrackingError(root.trackingError, candidate.forkedFromId);
+            root.trackingError = null;
+            return false;
+          }
           eligibleStartIndex = boundary.localBoundaryIndex;
         } catch (error) {
           this.setRootTrackingError(
@@ -822,7 +828,7 @@ export class AgentActivityCollector {
   private async resolveRootForkBoundary(
     sourceThreadId: string,
     rootRecords: readonly unknown[]
-  ): Promise<RootForkBoundary> {
+  ): Promise<RootForkBoundary | null> {
     const source = this.resolveRollout(sourceThreadId);
     if (source === null) {
       throw new Error('exact active/archive rollout is unavailable.');
@@ -842,7 +848,7 @@ export class AgentActivityCollector {
     const sourceTurnIds = collectPhysicalTurnIds(sourceBatch.records);
     const localBoundaryIndex = findLocalBoundaryIndex(rootRecords, sourceTurnIds);
     if (localBoundaryIndex < 0) {
-      throw new Error('root-local task_started boundary is not yet available.');
+      return null;
     }
 
     return {

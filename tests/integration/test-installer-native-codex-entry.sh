@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-TEST_ROOT="$(mktemp -d /data/ycfeng/tmp/codex-hud-native-entry-XXXXXX)"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/codex-hud-native-entry-XXXXXX")"
 FAKE_BIN="$TEST_ROOT/bin"
 TMP_ROOT="$TEST_ROOT/tmp"
 EMPTY_HOME="$TEST_ROOT/empty-home"
@@ -116,6 +116,8 @@ assert_no_managed_codex_alias "$EMPTY_HOME/.bash_profile"
 assert_no_managed_codex_alias "$EMPTY_ZDOTDIR/.zshrc"
 assert_exact_line "$EMPTY_HOME/.bashrc" "alias cx='$ROOT_DIR/bin/codex-hud'  $MARKER"
 assert_exact_line "$EMPTY_ZDOTDIR/.zshrc" "alias cx='$ROOT_DIR/bin/codex-hud'  $MARKER"
+assert_exact_line "$EMPTY_HOME/.bashrc" "alias cxl='$ROOT_DIR/bin/codex-hud-link'  $MARKER"
+assert_exact_line "$EMPTY_ZDOTDIR/.zshrc" "alias cxl='$ROOT_DIR/bin/codex-hud-link'  $MARKER"
 
 bash_resolution="$(
   HOME="$EMPTY_HOME" ZDOTDIR="$EMPTY_ZDOTDIR" PATH="$FAKE_BIN:/usr/bin:/bin" \

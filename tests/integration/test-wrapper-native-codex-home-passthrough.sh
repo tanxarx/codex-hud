@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-TEST_ROOT="$(mktemp -d /data/ycfeng/tmp/codex-hud-native-home-XXXXXX)"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/codex-hud-native-home-XXXXXX")"
 BIN_DIR="$TEST_ROOT/bin"
 HOME_DIR="$TEST_ROOT/home"
 CHATGPT_HOME="$TEST_ROOT/codex-home-chatgpt"
@@ -134,7 +134,7 @@ if [[ -z "$unset_launch" || -z "$unset_hud" ]]; then
   exit 1
 fi
 
-assert_absent "$unset_launch" "CODEX_HOME=" "unset native launch must not invent CODEX_HOME"
-assert_absent "$unset_hud" "CODEX_HOME=" "unset HUD pane must not invent CODEX_HOME"
+assert_absent "$unset_launch" " CODEX_HOME=" "unset native launch must not invent CODEX_HOME"
+assert_absent "$unset_hud" " CODEX_HOME=" "unset HUD pane must not invent CODEX_HOME"
 
 echo "test-wrapper-native-codex-home-passthrough: PASS (native_passthrough=1, unset_no_inject=1, chatgpt_profile=1)"

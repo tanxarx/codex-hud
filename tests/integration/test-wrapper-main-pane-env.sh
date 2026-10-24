@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 FAKE_TMUX_DIR="$SCRIPT_DIR/fake-tmux"
-TEST_ROOT="$(mktemp -d /data/ycfeng/tmp/codex-hud-main-pane-env-XXXXXX)"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/codex-hud-main-pane-env-XXXXXX")"
 FAKE_BIN_DIR="$TEST_ROOT/fake-bin"
 LOG_FILE="$TEST_ROOT/tmux.log"
 OUTPUT_LOG="$TEST_ROOT/wrapper.log"
@@ -80,6 +80,22 @@ fi
 if ! grep -q "CODEX_HUD_MAIN_PANE='%1'" "$LOG_FILE"; then
   echo "expected HUD command to include CODEX_HUD_MAIN_PANE for pane-bound session resolution" >&2
   cat "$LOG_FILE" >&2
+  exit 1
+fi
+
+# The caller's relative -C must reach Codex as an absolute path: a remote
+# app-server resolves relative paths in the daemon's own working directory.
+mkdir -p "$TEST_ROOT/target with spaces"
+: > "$LOG_FILE"
+(cd "$TEST_ROOT" && "$ROOT_DIR/bin/codex-hud" --new-session -C 'target with spaces') >"$OUTPUT_LOG" 2>&1
+expected="$(cd "$TEST_ROOT/target with spaces" && pwd)"
+if ! grep '^respawn-pane ' "$LOG_FILE" | grep -Fq "'-C' '$expected'"; then
+  echo 'expected absolute Codex -C path from the invocation directory' >&2
+  cat "$LOG_FILE" >&2
+  exit 1
+fi
+if ! grep '^split-window ' "$LOG_FILE" | grep -Fq "CODEX_HUD_CWD='$expected'"; then
+  echo 'expected HUD to observe the selected Codex directory' >&2
   exit 1
 fi
 

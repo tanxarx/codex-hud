@@ -7,6 +7,28 @@
 
 # Codex HUD
 
+This fork adds an agent-link launcher and a Claude-style dashboard to
+[fwyc0573/codex-hud](https://github.com/fwyc0573/codex-hud): exact remote-session
+binding, linked worktree and GitHub details, cache-hit age, optional estimated
+cache expiry, usage/reset bars, and approximate RAM.
+
+```bash
+git clone https://github.com/tanxarx/codex-hud.git
+cd codex-hud
+npm ci && npm run build
+./bin/codex-hud-install
+# Open a new shell, with agent-link installed at ~/Projects/agent-link:
+cxl
+cxl resume --last
+```
+
+`cxl` uses the native app-server daemon through agent-link. `cx` keeps the native
+launch path. Codex 0.164 defaults to a shared daemon whose snapshots lack the
+client pane; use `cxl` for live binding, or `cx --no-daemon` for the native
+snapshot path. See [setup, cache timer and fork updates](docs/remote-hud.md).
+
+The upstream documentation follows below.
+
 Real-time statusline HUD for [OpenAI Codex CLI](https://github.com/openai/codex). Lightweight, zero-config, works inside tmux.
 
 > Inspired by [claude-hud](https://github.com/jarrodwatts/claude-hud) for Claude Code.

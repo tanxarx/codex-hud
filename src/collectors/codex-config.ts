@@ -37,6 +37,7 @@ export function readCodexConfig(): CodexConfig {
       service_tier: parsed.service_tier as string | undefined,
       hooks: parsed.hooks as boolean | undefined,
       approval_policy: parsed.approval_policy as string | undefined,
+      approvals_reviewer: parsed.approvals_reviewer as string | undefined,
       sandbox_mode: parsed.sandbox_mode as string | undefined,
       mcp_servers: parseMcpServers(parsed.mcp_servers),
     };
@@ -107,6 +108,8 @@ export function getApprovalPolicyDisplay(
 ): string {
   const approvalPolicy = runtime?.approvalPolicy ?? config.approval_policy;
   const sandboxMode = runtime?.sandboxMode ?? config.sandbox_mode;
+  const reviewer = runtime?.approvalsReviewer ?? config.approvals_reviewer;
+  if (approvalPolicy === 'on-request' && reviewer === 'auto_review') return 'auto review';
 
   if (!approvalPolicy || approvalPolicy === 'untrusted' || approvalPolicy === 'on-request') {
     return 'ask for approval';

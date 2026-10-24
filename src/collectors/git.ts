@@ -4,6 +4,8 @@
  */
 
 import { spawnSync } from 'child_process';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { GitStatus } from '../types.js';
 
 /**
@@ -179,6 +181,19 @@ export function collectGitStatus(cwd?: string): GitStatus {
   
   const { ahead, behind } = getAheadBehind(cwd);
   const fileCounts = getFileChangeCounts(cwd);
+  const worktreeRoot = getRepoRoot(cwd) ?? undefined;
+  const gitDir = execGit(['rev-parse', '--absolute-git-dir'], cwd);
+  const commonDir = execGit(['rev-parse', '--git-common-dir'], cwd);
+  let isLinkedWorktree = false;
+  if (gitDir && commonDir) {
+    try {
+      isLinkedWorktree = fs.realpathSync(gitDir) !==
+        fs.realpathSync(path.resolve(cwd || process.cwd(), commonDir));
+    } catch { /* The worktree may have been removed during collection. */ }
+  }
+  const origin = execGit(['config', '--get', 'remote.origin.url'], cwd);
+  // Display only the public owner/repo slug, never credentials in remote URLs.
+  const githubRepo = origin?.match(/^(?:[^/@:]+@github\.com:|(?:https?|ssh):\/\/(?:[^/@]*@)?github\.com\/)([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/)?.[1];
   
   return {
     branch: getBranch(cwd),
@@ -187,6 +202,11 @@ export function collectGitStatus(cwd?: string): GitStatus {
     ahead,
     behind,
     ...fileCounts,
+    worktreeRoot,
+    worktreeName: worktreeRoot ? path.basename(worktreeRoot) : undefined,
+    isLinkedWorktree,
+    githubRepo,
+    upstreamBranch: execGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], cwd) ?? undefined,
   };
 }
 

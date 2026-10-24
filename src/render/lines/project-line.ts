@@ -60,7 +60,9 @@ export function renderProjectLine(data: HudData, options: ProjectLineOptions = {
   const maxWidth = options.maxWidth;
   
   // Project name (yellow like claude-hud)
-  const projectName = data.project.projectName;
+  const projectName = data.git.isLinkedWorktree
+    ? `${data.project.projectName} [WT:${data.git.worktreeName}]`
+    : data.project.projectName;
   const projectLabel = theme.projectName(projectName);
   const parts: string[] = [projectLabel];
   let gitDisplay = '';

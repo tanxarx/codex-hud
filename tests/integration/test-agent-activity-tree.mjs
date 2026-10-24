@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 
 import {
   appendRolloutRecords,
@@ -99,6 +100,70 @@ function logCount(logs, fragment) {
 const testRoot = makeAgentTestRoot();
 
 try {
+  await check('a fresh fork waits quietly for its first local turn and never adopts source agents', async () => {
+    const SOURCE = thread(810);
+    const ROOT = thread(811);
+    const CHILD = thread(812);
+    const sourcePath = writeRolloutFile(testRoot, { sessionId: SOURCE, records: [
+      canonicalSessionMeta({ id: SOURCE }),
+      taskStarted({ turnId: 'source-turn', startedAt: 100, timestamp: timestamp(100_000) }),
+      legacyAgentStart({ childThreadId: CHILD, agentPath: '/root/source_child',
+        occurredAtMs: 100_100, timestamp: timestamp(100_100) }),
+    ] });
+    const rootPath = writeRolloutFile(testRoot, { sessionId: ROOT,
+      records: [canonicalSessionMeta({ id: ROOT, forkedFromId: SOURCE })] });
+    const logs = [];
+    const collector = new AgentActivityCollector({ inactivityTimeoutMs: 1000,
+      logError: message => logs.push(message), resolveRollout: id =>
+        id === SOURCE ? rolloutSessionFile(sourcePath, SOURCE) : null });
+    collector.setRootSession(rolloutSessionFile(rootPath, ROOT));
+    let activity = await collector.collect(100_200);
+    assert.equal(activity.rootTrackingError, false);
+    assert.equal(activity.visibleAgentCount, 0);
+    assert.deepEqual(logs, []);
+    appendRolloutRecords(rootPath, [taskStarted({ turnId: 'fork-turn', startedAt: 101,
+      timestamp: timestamp(101_000) })]);
+    activity = await collector.collect(101_100);
+    assert.equal(activity.rootTrackingError, false);
+    assert.equal(activity.visibleAgentCount, 0);
+    assert.deepEqual(logs, []);
+  });
+  await check('resolves remote children beside their root when the TUI uses a different Codex home', async () => {
+    const originalHome = process.env.CODEX_HOME;
+    const originalSessions = process.env.CODEX_SESSIONS_PATH;
+    const clientHome = path.join(testRoot, 'client-home');
+    const daemonHome = path.join(testRoot, 'daemon-home');
+    fs.mkdirSync(path.join(clientHome, 'sessions'), { recursive: true });
+    process.env.CODEX_HOME = clientHome;
+    delete process.env.CODEX_SESSIONS_PATH;
+    const ROOT = thread(800);
+    const CHILD = thread(801);
+    try {
+      const rootPath = writeRolloutFile(daemonHome, {
+        sessionId: ROOT,
+        records: [canonicalSessionMeta({ id: ROOT }),
+          taskStarted({ turnId: 'remote-root', startedAt: 100, timestamp: timestamp(100_000) }),
+          legacyAgentStart({ childThreadId: CHILD, agentPath: '/root/remote_child',
+            occurredAtMs: 100_100, timestamp: timestamp(100_100) })],
+      });
+      writeRolloutFile(daemonHome, {
+        sessionId: CHILD,
+        records: [childMeta({ id: CHILD, parentThreadId: ROOT, agentPath: '/root/remote_child' }),
+          taskStarted({ turnId: 'remote-child', startedAt: 100, timestamp: timestamp(100_100) })],
+      });
+      const collector = new AgentActivityCollector({ inactivityTimeoutMs: 1000 });
+      collector.setRootSession(rolloutSessionFile(rootPath, ROOT));
+      const activity = await collector.collect(100_200);
+      assert.equal(activity.rootTrackingError, false);
+      assert.deepEqual(activity.rows.map(row => [row.threadId, row.label, row.status]),
+        [[CHILD, 'remote_child', 'running']]);
+    } finally {
+      if (originalHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = originalHome;
+      if (originalSessions === undefined) delete process.env.CODEX_SESSIONS_PATH;
+      else process.env.CODEX_SESSIONS_PATH = originalSessions;
+    }
+  });
   await check('replays historical completed agent activity without root tracking error', async () => {
     const ROOT = thread(900);
     const rootPath = writeRolloutFile(testRoot, {
